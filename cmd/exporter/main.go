@@ -32,5 +32,17 @@ func main() {
 	defer logger.Sync()
 
 	bc := binance.NewBinanceClient(logger)
-	_ = bc
+	ss, err := bc.GetSystemStatus()
+	if err != nil {
+		logger.Error("Failed to get Binance API status!", zap.Error(err))
+		os.Exit(1)
+	}
+
+	if ss != binance.Online {
+		logger.Error("Binance API is currently under maintenance, exiting...")
+		os.Exit(1)
+	}
+
+	bc.GetFundingWallet()
+	bc.GetUserAssets()
 }
