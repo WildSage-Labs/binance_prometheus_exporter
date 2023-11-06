@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Entrio/subenv"
@@ -37,10 +38,16 @@ type (
 		httpclient http.Client
 		logger     *zap.Logger
 		security   security
+		funding    Data
+		spot       Data
 	}
 	security struct {
 		PublicKey  string `json:"-"`
 		PrivateKey string `json:"-"`
+	}
+	Data struct {
+		Assets []Asset
+		lock   sync.RWMutex
 	}
 )
 
@@ -66,9 +73,37 @@ func NewBinanceClient(l *zap.Logger) *Client {
 			PublicKey:  pubkey,
 			PrivateKey: privKey,
 		},
+		funding: Data{
+			Assets: make([]Asset, 0),
+		},
+		spot: Data{
+			Assets: make([]Asset, 0),
+		},
 	}
 }
 
+func (c *Client) GetSpotAssets() []Asset {
+	// Make a copy of an asset array
+	c.spot.lock.RLock()
+	defer c.spot.lock.RUnlock()
+	var res []Asset
+	res = append(res, c.spot.Assets...)
+	return res
+}
+
+func (c *Client) GetFundingAssets() []Asset {
+	// Make a copy of an asset array
+	c.funding.lock.RLock()
+	defer c.funding.lock.RUnlock()
+	var res []Asset
+	res = append(res, c.funding.Assets...)
+	return res
+}
+
+/*
+*
+generateSignature uses Client's private key to generate a sha256 hash of provided string.
+*/
 func (s security) generateSignature(payload string) string {
 	//TODO: Generate actual signature
 
@@ -79,6 +114,10 @@ func (s security) generateSignature(payload string) string {
 	return hex.EncodeToString(expectedMAC)
 }
 
+/*
+*
+signrequest grabs the uri, assigns timestamp to it and signs it. URI afterwards is re-assembled and signature is appended
+*/
 func (c *Client) signrequest(uri string, signed bool) string {
 	// Split the url at ? to get the part of the URI we need to sign
 	extracted := strings.Split(uri, "?")
@@ -158,7 +197,9 @@ func (c *Client) GetFundingWallet() {
 		c.logger.Error("Failed to decode body.", zap.Error(err))
 		return
 	}
-	fmt.Println(assets)
+	c.funding.lock.Lock()
+	defer c.funding.lock.Unlock()
+	c.funding.Assets = assets
 }
 
 func (c *Client) GetUserAssets() {
@@ -191,7 +232,9 @@ func (c *Client) GetUserAssets() {
 		c.logger.Error("Failed to decode body.", zap.Error(err))
 		return
 	}
-	fmt.Println(assets)
+	c.spot.lock.Lock()
+	defer c.spot.lock.Unlock()
+	c.spot.Assets = assets
 }
 
 func (c *Client) buildGetRequest(url string) (*http.Request, func(), error) {
